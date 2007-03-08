@@ -1,0 +1,52 @@
+NAME
+    Net::DNS::Callback - Asynchronous DNS Helper
+
+SYNOPSIS
+            use Net::DNS::Callback;
+
+            my $c = new Net::DNS::Callback(QueueSize => 20);
+
+            for (...) {
+                    $c->add(\&callback, @query);
+            }
+            $c->done();
+
+            sub callback {
+                    my $response = shift;
+                    ...
+            }
+
+CONSTRUCTOR
+    The class method new(...) constructs a new helper object. All arguments
+    are optional. The following parameters are recognised as arguments to
+    new():
+
+    QueueSize
+        The size of the query queue. If this is exceeded, further calls to
+        add() will block until some responses are received or time out.
+
+    Timeout
+        The timeout for an individual query.
+
+METHODS
+    $c->add($callback, @query)
+        Adds a new query for asynchronous handling. The @query arguments are
+        those to Net::DNS::Resolver->bgsend(), q.v. This call will block
+        until the queue is less than QueueSize.
+
+    $c->done()
+        Flushes the queue, that is, waits for and handles all remaining
+        responses.
+
+BUGS
+    UDP retries are not yet implemented.
+
+SEE ALSO
+    Net::DNS
+
+COPYRIGHT
+    Copyright (c) 2005-2006 Shevek. All rights reserved.
+
+    This program is free software; you can redistribute it and/or modify it
+    under the same terms as Perl itself.
+

@@ -1,0 +1,12 @@
+# http://module-build.sourceforge.net/META-spec.html
+#XXXXXXX This is a prototype!!!  It will change in the future!!! XXXXX#
+name:         Net-DNS-Callback
+version:      1.00
+version_from: lib/Net/DNS/Callback.pm
+installdirs:  site
+requires:
+    Net::DNS:                      0
+    Test::More:                    0
+
+distribution_type: module
+generated_by: ExtUtils::MakeMaker version 6.17
