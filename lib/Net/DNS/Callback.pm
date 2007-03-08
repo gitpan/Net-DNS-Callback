@@ -7,7 +7,7 @@ use Net::DNS::Resolver;
 use IO::Select;
 use Time::HiRes;
 
-$VERSION = '1.00';
+$VERSION = '1.01';
 
 sub new {
 	my $class = shift;
@@ -16,6 +16,7 @@ sub new {
 	$self->{Timeout} = 4 unless $self->{Timeout};
 	$self->{Resolver} = new Net::DNS::Resolver();
 	$self->{Selector} = new IO::Select();
+	$self->{Retries} = 3 unless $self->{Retries};
 	return bless $self, $class;
 }
 
@@ -41,9 +42,13 @@ sub send {
 		$socket->close();
 	}
 
+	if ($self->{Retries} < ++$data->[2]) {
+		$data->[0]->(undef);
+		return;
+	}
+
 	$socket = $self->{Resolver}->bgsend(@{$data->[1]});
 
-	$data->[2]++;
 	$data->[3] = time();
 	$data->[4] = $socket;
 
@@ -89,13 +94,13 @@ sub done {
 
 =head1 NAME
 
-Net::DNS::Callback - Asynchronous DNS Helper
+Net::DNS::Callback - Asynchronous DNS helper for high volume applications
 
 =head1 SYNOPSIS
 
 	use Net::DNS::Callback;
 
-	my $c = new Net::DNS::Callback(QueueSize => 20);
+	my $c = new Net::DNS::Callback(QueueSize => 20, Retries => 3);
 
 	for (...) {
 		$c->add(\&callback, @query);
@@ -120,6 +125,10 @@ to new():
 The size of the query queue. If this is exceeded, further calls to
 add() will block until some responses are received or time out.
 
+=item Retries
+
+The number of times to retry a query before giving up.
+
 =item Timeout
 
 The timeout for an individual query.
@@ -136,6 +145,11 @@ Adds a new query for asynchronous handling. The @query arguments are
 those to Net::DNS::Resolver->bgsend(), q.v. This call will block
 until the queue is less than QueueSize.
 
+The user callback will be called at some point in the future, with
+a Net::DNS::Packet object representing the response. If the query
+timed out after the specified number of retries, the callback will
+be called with undef.
+
 =item $c->done()
 
 Flushes the queue, that is, waits for and handles all remaining
@@ -145,7 +159,7 @@ responses.
 
 =head1 BUGS
 
-UDP retries are not yet implemented.
+The test suite does not test query timeouts.
 
 =head1 SEE ALSO
 
