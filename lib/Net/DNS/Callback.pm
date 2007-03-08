@@ -7,7 +7,7 @@ use Net::DNS::Resolver;
 use IO::Select;
 use Time::HiRes;
 
-$VERSION = '1.01';
+$VERSION = '1.02';
 
 sub new {
 	my $class = shift;
@@ -87,10 +87,12 @@ sub recv {
 	}
 }
 
-sub done {
+sub await {
 	my $self = shift;
 	$self->recv while keys %{ $self->{Queue} };
 }
+
+*done = \&await;
 
 =head1 NAME
 
@@ -105,12 +107,24 @@ Net::DNS::Callback - Asynchronous DNS helper for high volume applications
 	for (...) {
 		$c->add(\&callback, @query);
 	}
-	$c->done();
+	$c->await();
 
 	sub callback {
 		my $response = shift;
 		...
 	}
+
+=head1 DESCRIPTION
+
+Net::DNS::Callback is a fire-and-forget asynchronous DNS helper.
+That is, the user application adds DNS questions to the helper, and
+the callback will be called at some point in the future without
+further intervention from the user application. The application need
+not handle selects, timeouts, waiting for a response or any other
+such issues.
+
+This module is similar in principle to POE::Component::Client::DNS,
+but does not require POE.
 
 =head1 CONSTRUCTOR
 
@@ -150,7 +164,7 @@ a Net::DNS::Packet object representing the response. If the query
 timed out after the specified number of retries, the callback will
 be called with undef.
 
-=item $c->done()
+=item $c->await()
 
 Flushes the queue, that is, waits for and handles all remaining
 responses.
