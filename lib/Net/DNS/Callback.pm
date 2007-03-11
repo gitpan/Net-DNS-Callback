@@ -7,7 +7,7 @@ use Net::DNS::Resolver;
 use IO::Select;
 use Time::HiRes;
 
-$VERSION = '1.02';
+$VERSION = '1.03';
 
 sub new {
 	my $class = shift;
@@ -23,8 +23,17 @@ sub new {
 sub add {
 	my ($self, $callback, @query) = @_;
 
+	unless (ref($callback) eq 'CODE') {
+		die "add() requires a CODE reference as first arg";
+	}
+	unless (@query) {
+		die "add() requires a DNS query as trailing args";
+	}
+
 	# print "Queue size " . scalar(keys %{ $self->{Queue} });
 	while (scalar(keys %{ $self->{Queue} }) > $self->{QueueSize}) {
+		# I'm fairly sure this can't busy wait since it must
+		# either time out an entry or receive an entry.
 		$self->recv();
 	}
 
@@ -32,7 +41,7 @@ sub add {
 	$self->send($data);
 }
 
-sub send {
+sub cleanup {
 	my ($self, $data) = @_;
 
 	my $socket = $data->[4];
@@ -41,13 +50,19 @@ sub send {
 		delete $self->{Queue}->{$socket->fileno};
 		$socket->close();
 	}
+}
 
-	if ($self->{Retries} < ++$data->[2]) {
-		$data->[0]->(undef);
-		return;
+sub send {
+	my ($self, $data) = @_;
+
+	my $socket = $self->{Resolver}->bgsend(@{$data->[1]});
+
+	unless ($socket) {
+		die "No socket returned from bgsend()";
 	}
-
-	$socket = $self->{Resolver}->bgsend(@{$data->[1]});
+	unless ($socket->fileno) {
+		die "Socket returned from bgsend() has no fileno";
+	}
 
 	$data->[3] = time();
 	$data->[4] = $socket;
@@ -66,23 +81,45 @@ sub recv {
 		for (values %{ $self->{Queue} }) {
 			$time = $_->[3] if $_->[3] < $time;
 		}
-		$time += $self->{Timeout};
+		# Add timeout, and compute delay until then.
+		$time = $time + $self->{Timeout} - time();
+		# It could have been a while ago.
+		$time = 0 if $time < 0;
 	}
 
 	my @sockets = $self->{Selector}->can_read($time - time());
 	for my $socket (@sockets) {
+		# If we recursed from the user callback into add(), then
+		# we might have read from and closed this socket.
+		# XXX A neater solution would be to collect all the
+		# callbacks and perform them after this loop has exited.
+		next unless $socket->fileno;
 		$self->{Selector}->remove($socket);
 		my $data = delete $self->{Queue}->{$socket->fileno};
+		unless ($data) {
+			die "No data for socket " . $socket->fileno;
+		}
 		my $response = $self->{Resolver}->bgread($socket);
-		$data->[0]->($response);
 		$socket->close();
+		eval {
+			$data->[0]->($response);
+		};
+		if ($@) {
+			die "Callback died within " . __PACKAGE__ . ": $@";
+		}
 	}
 
 	$time = time();
 	for (values %{ $self->{Queue} }) {
 		if ($_->[3] + $self->{Timeout} < $time) {
 			# It timed out.
-			$self->send($_);
+			$self->cleanup($_);
+			if ($self->{Retries} < ++$_->[2]) {
+				$_->[0]->(undef);
+			}
+			else {
+				$self->send($_);
+			}
 		}
 	}
 }
@@ -157,7 +194,8 @@ The timeout for an individual query.
 
 Adds a new query for asynchronous handling. The @query arguments are
 those to Net::DNS::Resolver->bgsend(), q.v. This call will block
-until the queue is less than QueueSize.
+if the queue is full. When some pending responses are received or
+timeout events occur, the call will unblock.
 
 The user callback will be called at some point in the future, with
 a Net::DNS::Packet object representing the response. If the query
@@ -177,7 +215,8 @@ The test suite does not test query timeouts.
 
 =head1 SEE ALSO
 
-L<Net::DNS>
+L<Net::DNS>,
+L<POE::Component::Client::DNS>
 
 =head1 COPYRIGHT
 
